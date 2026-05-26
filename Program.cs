@@ -18,6 +18,10 @@ static class Program
         }
 
         ApplicationConfiguration.Initialize();
+        // UIの配色をシステムカラーに合わせる
+        Application.SetColorMode(SystemColorMode.System);
+        // メニューの左側マージンの余計なエフェクトを消す
+        ToolStripManager.Renderer = new ToolStripSystemRenderer();
 
         // メインウィンドウなしでシステムトレイアイコンのみで動作
         var trayApp = new TrayApplicationContext();
