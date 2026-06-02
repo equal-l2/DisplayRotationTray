@@ -10,9 +10,18 @@ using static DisplayRotationTray.Win32Native;
 /// </summary>
 public class DisplayRotation
 {
+    private const string DummyDisplayDeviceNamePrefix = @"\\.\DISPLAY_DUMMY";
+    private readonly int dummyDisplayCount;
+    private readonly Dictionary<string, int> dummyDisplayRotations = [];
+
     // デバッグログファイルのパス
     // %LOCALAPPDATA%\DisplayRotationTray\Logs\debug.log に出力
     private static readonly string LogFilePath = GetLogFilePath();
+
+    public DisplayRotation(int dummyDisplayCount = 0)
+    {
+        this.dummyDisplayCount = Math.Max(0, dummyDisplayCount);
+    }
 
     /// <summary>
     /// ログファイルのパスを取得する
@@ -82,6 +91,12 @@ public class DisplayRotation
             }
             
             deviceIndex++;
+        }
+
+        // 開発用: --dev-dummy-display [個数] 指定時だけ、複数ディスプレイUI確認用のダミーを追加する。
+        for (var i = 1; i <= dummyDisplayCount; i++)
+        {
+            displays.Add(new DisplayInfo(GetDummyDisplayDeviceName(i), $"Dummy Display {i}", false));
         }
 
         return displays;
@@ -261,6 +276,12 @@ public class DisplayRotation
     /// <returns>回転角度（0: 通常, 1: 90度, 2: 180度, 3: 270度）</returns>
     public int GetCurrentRotation(string deviceName)
     {
+        // 開発用: ダミーディスプレイはWin32 APIを呼ばず、メモリ上の角度を返す。
+        if (IsDummyDisplay(deviceName))
+        {
+            return dummyDisplayRotations.GetValueOrDefault(deviceName, DMDO_DEFAULT);
+        }
+
         var devMode = new DEVMODE();
         devMode.dmSize = (short)Marshal.SizeOf(typeof(DEVMODE));
 
@@ -283,6 +304,13 @@ public class DisplayRotation
     /// <exception cref="InvalidOperationException">設定の取得または変更に失敗した場合</exception>
     public void SetRotation(string deviceName, int rotation)
     {
+        // 開発用: ダミーディスプレイは実画面に影響させず、メモリ上の角度だけ更新する。
+        if (IsDummyDisplay(deviceName))
+        {
+            dummyDisplayRotations[deviceName] = rotation;
+            return;
+        }
+
         var devMode = new DEVMODE();
         devMode.dmSize = (short)Marshal.SizeOf(typeof(DEVMODE));
 
@@ -326,5 +354,16 @@ public class DisplayRotation
         {
             throw new InvalidOperationException("ディスプレイの回転に失敗しました");
         }
+    }
+
+    private bool IsDummyDisplay(string deviceName)
+    {
+        return dummyDisplayCount > 0 &&
+            deviceName.StartsWith(DummyDisplayDeviceNamePrefix, StringComparison.Ordinal);
+    }
+
+    private static string GetDummyDisplayDeviceName(int index)
+    {
+        return $"{DummyDisplayDeviceNamePrefix}{index}";
     }
 }

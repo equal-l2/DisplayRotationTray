@@ -5,10 +5,12 @@ public class TrayApplicationContext : ApplicationContext
     private NotifyIcon trayIcon;
     private ContextMenuStrip contextMenu;
     private DisplayRotation displayRotation;
+    private AppSettings settings;
 
-    public TrayApplicationContext()
+    public TrayApplicationContext(int dummyDisplayCount = 0)
     {
-        displayRotation = new DisplayRotation();
+        displayRotation = new DisplayRotation(dummyDisplayCount);
+        settings = AppSettings.Load();
 
         // メインメニュー作成
         contextMenu = new ContextMenuStrip();
@@ -22,10 +24,14 @@ public class TrayApplicationContext : ApplicationContext
             Visible = true
         };
 
-        // 右クリック時にメニューを更新
+        // 左クリック時はクイック切り替えを実行し、右クリック時はメニューを更新
         trayIcon.MouseUp += (s, e) =>
         {
-            if (e.Button == MouseButtons.Right)
+            if (e.Button == MouseButtons.Left)
+            {
+                ToggleLeftClickTargets();
+            }
+            else if (e.Button == MouseButtons.Right)
             {
                 UpdateContextMenu();
             }
@@ -78,6 +84,9 @@ public class TrayApplicationContext : ApplicationContext
             contextMenu.Items.Add(new ToolStripSeparator());
         }
 
+        // 設定メニューを追加
+        contextMenu.Items.Add("設定", null, (s, e) => ShowSettings());
+
         // 終了メニューを追加
         contextMenu.Items.Add("終了", null, (s, e) => ExitApplication());
     }
@@ -96,6 +105,96 @@ public class TrayApplicationContext : ApplicationContext
                     MessageBoxButtons.OK, MessageBoxIcon.Error);
             }
         }
+    }
+
+    private void ToggleLeftClickTargets()
+    {
+        if (!settings.LeftClickRotationEnabled)
+        {
+            return;
+        }
+
+        var displays = displayRotation.GetDisplays();
+        EnsureDefaultLeftClickRotationSettings(displays);
+
+        var targetDisplay = displays.FirstOrDefault(display => display.DeviceName == settings.LeftClickTargetDeviceName);
+        if (targetDisplay is null)
+        {
+            ShowSettings();
+            return;
+        }
+
+        var enabledRotations = settings.GetEnabledRotations(targetDisplay.DeviceName);
+        if (enabledRotations.Count == 0)
+        {
+            ShowSettings();
+            return;
+        }
+
+        try
+        {
+            var currentRotation = displayRotation.GetCurrentRotation(targetDisplay.DeviceName);
+            displayRotation.SetRotation(targetDisplay.DeviceName, GetNextRotation(currentRotation, enabledRotations));
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show($"クイック切り替えに失敗しました: {ex.Message}", "エラー",
+                MessageBoxButtons.OK, MessageBoxIcon.Error);
+        }
+    }
+
+    private void EnsureDefaultLeftClickRotationSettings(List<DisplayInfo> displays)
+    {
+        if (displays.Count == 0)
+        {
+            return;
+        }
+
+        var settingsChanged = false;
+        if (string.IsNullOrEmpty(settings.LeftClickTargetDeviceName) ||
+            !displays.Any(display => display.DeviceName == settings.LeftClickTargetDeviceName))
+        {
+            var defaultDisplay = displays.FirstOrDefault(display => display.IsPrimary) ?? displays[0];
+            settings.LeftClickTargetDeviceName = defaultDisplay.DeviceName;
+            settingsChanged = true;
+        }
+
+        if (!settings.LeftClickRotationTargets.ContainsKey(settings.LeftClickTargetDeviceName))
+        {
+            settings.LeftClickRotationTargets[settings.LeftClickTargetDeviceName] = AppSettings.RotationCycle.ToList();
+            settingsChanged = true;
+        }
+
+        if (settingsChanged)
+        {
+            settings.Save();
+        }
+    }
+
+    private void ShowSettings()
+    {
+        using var settingsForm = new SettingsForm(displayRotation, settings);
+        settingsForm.ShowDialog();
+        settings = AppSettings.Load();
+        UpdateContextMenu();
+    }
+
+    private static int GetNextRotation(int currentRotation, List<int> enabledRotations)
+    {
+        if (enabledRotations.Count == 0)
+        {
+            return currentRotation;
+        }
+
+        foreach (var rotation in AppSettings.RotationCycle)
+        {
+            if (rotation > currentRotation && enabledRotations.Contains(rotation))
+            {
+                return rotation;
+            }
+        }
+
+        return enabledRotations[0];
     }
 
     private void ExitApplication()
